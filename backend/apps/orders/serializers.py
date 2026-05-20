@@ -1,36 +1,45 @@
+"""
+Serializers de carrito y pedidos - AudioPro
+"""
 from rest_framework import serializers
-from .models import Cart, CartItem, Order, OrderItem
 from apps.products.serializers import ProductListSerializer
+from .models import Cart, CartItem, Order, OrderItem
 
 
 class CartItemSerializer(serializers.ModelSerializer):
-    product_detail = ProductListSerializer(source='product', read_only=True)
-    subtotal = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    product = ProductListSerializer(read_only=True)
     product_id = serializers.IntegerField(write_only=True)
+    subtotal = serializers.ReadOnlyField()
 
     class Meta:
         model = CartItem
-        fields = ['id', 'product_id', 'product_detail', 'quantity', 'subtotal', 'added_at']
+        fields = ['id', 'product', 'product_id', 'quantity', 'subtotal', 'added_at']
         read_only_fields = ['id', 'added_at']
 
     def validate_product_id(self, value):
         from apps.products.models import Product
         try:
-            product = Product.objects.get(id=value, status='active')
+            product = Product.objects.get(pk=value)
         except Product.DoesNotExist:
+            raise serializers.ValidationError('Producto no encontrado.')
+        if not product.is_available:
             raise serializers.ValidationError('Producto no disponible.')
         return value
 
-    def validate_quantity(self, value):
-        if value < 1:
-            raise serializers.ValidationError('La cantidad debe ser al menos 1.')
-        return value
+    def validate(self, attrs):
+        from apps.products.models import Product
+        product = Product.objects.get(pk=attrs['product_id'])
+        if attrs.get('quantity', 1) > product.stock:
+            raise serializers.ValidationError(
+                {'quantity': f'Solo hay {product.stock} unidades disponibles.'}
+            )
+        return attrs
 
 
 class CartSerializer(serializers.ModelSerializer):
     items = CartItemSerializer(many=True, read_only=True)
-    total = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
-    item_count = serializers.IntegerField(read_only=True)
+    total = serializers.ReadOnlyField()
+    item_count = serializers.ReadOnlyField()
 
     class Meta:
         model = Cart
@@ -40,7 +49,6 @@ class CartSerializer(serializers.ModelSerializer):
 class OrderItemSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source='product.name', read_only=True)
     product_brand = serializers.CharField(source='product.brand', read_only=True)
-    subtotal = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
 
     class Meta:
         model = OrderItem
@@ -51,23 +59,27 @@ class OrderItemSerializer(serializers.ModelSerializer):
 class OrderSerializer(serializers.ModelSerializer):
     items = OrderItemSerializer(many=True, read_only=True)
     user_email = serializers.CharField(source='user.email', read_only=True)
-    user_name = serializers.CharField(source='user.get_full_name', read_only=True)
+    user_name = serializers.CharField(source='user.full_name', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
 
     class Meta:
         model = Order
-        fields = ['id', 'order_number', 'user_email', 'user_name', 'status',
-                  'status_display', 'subtotal', 'total', 'notes',
-                  'shipping_address', 'items', 'created_at', 'updated_at']
-        read_only_fields = ['id', 'order_number', 'subtotal', 'total', 'created_at', 'updated_at']
+        fields = [
+            'id', 'order_number', 'user', 'user_email', 'user_name',
+            'status', 'status_display', 'subtotal', 'tax', 'total',
+            'shipping_address', 'notes', 'items', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'order_number', 'user', 'subtotal', 'tax', 'total',
+                            'created_at', 'updated_at']
 
 
-class CreateOrderSerializer(serializers.Serializer):
+class OrderCreateSerializer(serializers.Serializer):
     """Serializer para crear pedido desde el carrito."""
-    notes = serializers.CharField(required=False, allow_blank=True)
     shipping_address = serializers.CharField(required=False, allow_blank=True)
+    notes = serializers.CharField(required=False, allow_blank=True)
 
 
-class UpdateOrderStatusSerializer(serializers.Serializer):
+class OrderStatusUpdateSerializer(serializers.Serializer):
     """Serializer para actualizar estado de pedido (admin)."""
-    status = serializers.ChoiceField(choices=Order.STATUS_CHOICES)
+    status = serializers.ChoiceField(choices=Order.Status.choices)
+    notes = serializers.CharField(required=False, allow_blank=True)

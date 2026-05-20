@@ -1,56 +1,91 @@
+"""
+Serializers de pagos - AudioPro
+"""
 from rest_framework import serializers
-from .models import Payment
+from .models import Payment, PaymentEvidence
+
+
+class PaymentEvidenceSerializer(serializers.ModelSerializer):
+    file_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PaymentEvidence
+        fields = ['id', 'file', 'file_url', 'file_name', 'description', 'uploaded_at']
+        read_only_fields = ['id', 'uploaded_at']
+
+    def get_file_url(self, obj):
+        request = self.context.get('request')
+        if obj.file and request:
+            return request.build_absolute_uri(obj.file.url)
+        return None
 
 
 class PaymentSerializer(serializers.ModelSerializer):
-    """Serializer para ver pagos."""
+    evidences = PaymentEvidenceSerializer(many=True, read_only=True)
     order_number = serializers.CharField(source='order.order_number', read_only=True)
-    order_total = serializers.DecimalField(source='order.total', max_digits=10, decimal_places=2, read_only=True)
     user_email = serializers.CharField(source='user.email', read_only=True)
-    user_name = serializers.CharField(source='user.get_full_name', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     method_display = serializers.CharField(source='get_method_display', read_only=True)
-    voucher_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Payment
         fields = [
-            'id', 'order', 'order_number', 'order_total',
-            'user_email', 'user_name', 'method', 'method_display',
-            'amount', 'reference', 'voucher', 'voucher_url',
-            'status', 'status_display', 'admin_notes',
+            'id', 'order', 'order_number', 'user', 'user_email',
+            'method', 'method_display', 'status', 'status_display',
+            'amount', 'stripe_session_id', 'stripe_payment_intent',
+            'reference_number', 'notes', 'evidences',
+            'reviewed_by', 'reviewed_at', 'rejection_reason',
             'created_at', 'updated_at'
         ]
-        read_only_fields = ['id', 'user', 'status', 'admin_notes', 'created_at', 'updated_at']
-
-    def get_voucher_url(self, obj):
-        request = self.context.get('request')
-        if obj.voucher and request:
-            return request.build_absolute_uri(obj.voucher.url)
-        return None
+        read_only_fields = [
+            'id', 'user', 'amount', 'stripe_session_id', 'stripe_payment_intent',
+            'reviewed_by', 'reviewed_at', 'created_at', 'updated_at'
+        ]
 
 
-class CreatePaymentSerializer(serializers.ModelSerializer):
-    """Serializer para que el cliente registre su pago."""
+class PaymentCreateSerializer(serializers.Serializer):
+    """Crear pago manual (transferencia/efectivo)."""
+    order_id = serializers.IntegerField()
+    method = serializers.ChoiceField(choices=[
+        ('transfer', 'Transferencia Bancaria'),
+        ('cash', 'Efectivo'),
+        ('other', 'Otro'),
+    ])
+    reference_number = serializers.CharField(required=False, allow_blank=True)
+    notes = serializers.CharField(required=False, allow_blank=True)
 
-    class Meta:
-        model = Payment
-        fields = ['order', 'method', 'amount', 'reference', 'voucher']
-
-    def validate_order(self, value):
-        user = self.context['request'].user
-        if value.user != user:
-            raise serializers.ValidationError('No tienes permiso sobre este pedido.')
-        if hasattr(value, 'payment'):
+    def validate_order_id(self, value):
+        from apps.orders.models import Order
+        try:
+            order = Order.objects.get(pk=value)
+        except Order.DoesNotExist:
+            raise serializers.ValidationError('Pedido no encontrado.')
+        if hasattr(order, 'payment'):
             raise serializers.ValidationError('Este pedido ya tiene un pago registrado.')
         return value
 
-    def create(self, validated_data):
-        validated_data['user'] = self.context['request'].user
-        return super().create(validated_data)
+
+class PaymentReviewSerializer(serializers.Serializer):
+    """Revisar pago (admin)."""
+    action = serializers.ChoiceField(choices=['approve', 'reject'])
+    rejection_reason = serializers.CharField(required=False, allow_blank=True)
+
+    def validate(self, attrs):
+        if attrs['action'] == 'reject' and not attrs.get('rejection_reason'):
+            raise serializers.ValidationError(
+                {'rejection_reason': 'Debe indicar el motivo del rechazo.'}
+            )
+        return attrs
 
 
-class ReviewPaymentSerializer(serializers.Serializer):
-    """Serializer para que el admin apruebe o rechace un pago."""
-    status = serializers.ChoiceField(choices=[('approved', 'Aprobado'), ('rejected', 'Rechazado')])
-    admin_notes = serializers.CharField(required=False, allow_blank=True)
+class StripeCheckoutSerializer(serializers.Serializer):
+    """Iniciar sesión de pago con Stripe."""
+    order_id = serializers.IntegerField()
+
+    def validate_order_id(self, value):
+        from apps.orders.models import Order
+        try:
+            order = Order.objects.get(pk=value)
+        except Order.DoesNotExist:
+            raise serializers.ValidationError('Pedido no encontrado.')
+        return value

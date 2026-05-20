@@ -1,21 +1,39 @@
+"""
+Vistas de productos - AudioPro
+"""
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
-from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, IsAdminUser, AllowAny
+from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
-from .models import Category, Product, StockMovement
+from django_filters import rest_framework as filters
+
+from .models import Category, Product
 from .serializers import (
-    CategorySerializer, ProductListSerializer, ProductDetailSerializer,
-    StockMovementSerializer, AddStockSerializer
+    CategorySerializer,
+    ProductListSerializer,
+    ProductDetailSerializer,
+    StockUpdateSerializer,
 )
-from .filters import ProductFilter
+
+
+class ProductFilter(filters.FilterSet):
+    min_price = filters.NumberFilter(field_name='price', lookup_expr='gte')
+    max_price = filters.NumberFilter(field_name='price', lookup_expr='lte')
+    category = filters.CharFilter(field_name='category__slug')
+
+    class Meta:
+        model = Product
+        fields = ['status', 'brand', 'category', 'min_price', 'max_price']
 
 
 class CategoryViewSet(viewsets.ModelViewSet):
     """CRUD de categorías."""
-    queryset = Category.objects.filter(is_active=True)
+    queryset = Category.objects.all()
     serializer_class = CategorySerializer
+    filter_backends = [SearchFilter]
+    search_fields = ['name']
 
     def get_permissions(self):
         if self.action in ['list', 'retrieve']:
@@ -24,13 +42,18 @@ class CategoryViewSet(viewsets.ModelViewSet):
 
 
 class ProductViewSet(viewsets.ModelViewSet):
-    """CRUD de productos con filtros y búsqueda."""
-    queryset = Product.objects.select_related('category').all()
+    """CRUD de productos con acciones adicionales."""
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_class = ProductFilter
     search_fields = ['name', 'brand', 'model_number', 'description']
-    ordering_fields = ['price', 'name', 'created_at', 'stock']
+    ordering_fields = ['price', 'created_at', 'name', 'stock']
     ordering = ['-created_at']
+
+    def get_queryset(self):
+        # Clientes solo ven productos activos
+        if self.request.user.is_authenticated and self.request.user.is_staff:
+            return Product.objects.select_related('category').all()
+        return Product.objects.select_related('category').filter(status=Product.Status.ACTIVE)
 
     def get_serializer_class(self):
         if self.action == 'list':
@@ -42,62 +65,69 @@ class ProductViewSet(viewsets.ModelViewSet):
             return [AllowAny()]
         return [IsAdminUser()]
 
-    def get_queryset(self):
-        qs = super().get_queryset()
-        # Clientes solo ven productos activos
-        if not self.request.user.is_authenticated or not self.request.user.is_staff:
-            qs = qs.filter(status='active')
-        return qs
-
     @action(detail=True, methods=['post'], permission_classes=[IsAdminUser])
-    def add_stock(self, request, pk=None):
-        """Agregar stock a un producto."""
+    def update_stock(self, request, pk=None):
+        """Actualizar stock de un producto."""
         product = self.get_object()
-        serializer = AddStockSerializer(data=request.data)
+        serializer = StockUpdateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        quantity = serializer.validated_data['quantity']
-        notes = serializer.validated_data.get('notes', '')
+        qty = serializer.validated_data['quantity']
+        op = serializer.validated_data['operation']
 
-        product.add_stock(quantity)
+        if op == 'set':
+            product.stock = qty
+        elif op == 'add':
+            product.stock += qty
+        elif op == 'subtract':
+            if product.stock < qty:
+                return Response(
+                    {'error': 'No hay suficiente stock para restar.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            product.stock -= qty
 
-        StockMovement.objects.create(
-            product=product,
-            movement_type='in',
-            quantity=quantity,
-            notes=notes,
-            created_by=request.user
-        )
+        # Actualizar estado según stock
+        if product.stock == 0:
+            product.status = Product.Status.OUT_OF_STOCK
+        elif product.status == Product.Status.OUT_OF_STOCK:
+            product.status = Product.Status.ACTIVE
+        product.save()
 
         return Response({
-            'message': f'Stock actualizado. Nuevo stock: {product.stock}',
-            'stock': product.stock
+            'message': 'Stock actualizado.',
+            'stock': product.stock,
+            'status': product.status
         })
 
     @action(detail=True, methods=['post'], permission_classes=[IsAdminUser])
     def toggle_status(self, request, pk=None):
         """Activar o desactivar un producto."""
         product = self.get_object()
-        if product.status == 'active':
-            product.status = 'inactive'
-        elif product.status == 'inactive':
-            product.status = 'active'
+        if product.status == Product.Status.ACTIVE:
+            product.status = Product.Status.INACTIVE
+        elif product.status == Product.Status.INACTIVE:
+            product.status = Product.Status.ACTIVE
+        else:
+            return Response(
+                {'error': 'No se puede cambiar estado de producto sin stock.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
         product.save()
-        return Response({'message': f'Producto {product.status}', 'status': product.status})
+        return Response({'message': f'Producto {product.status}.', 'status': product.status})
 
-    @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated])
-    def featured(self, request):
-        """Productos destacados."""
-        products = Product.objects.filter(status='active', featured=True)
-        serializer = ProductListSerializer(products, many=True, context={'request': request})
-        return Response(serializer.data)
-
-
-class StockMovementViewSet(viewsets.ReadOnlyModelViewSet):
-    """Historial de movimientos de stock (solo admin)."""
-    queryset = StockMovement.objects.select_related('product', 'created_by').all()
-    serializer_class = StockMovementSerializer
-    permission_classes = [IsAdminUser]
-    filter_backends = [DjangoFilterBackend, OrderingFilter]
-    filterset_fields = ['product', 'movement_type']
-    ordering = ['-created_at']
+    @action(detail=False, methods=['get'], permission_classes=[IsAdminUser])
+    def stats(self, request):
+        """Estadísticas de productos para dashboard."""
+        total = Product.objects.count()
+        active = Product.objects.filter(status=Product.Status.ACTIVE).count()
+        inactive = Product.objects.filter(status=Product.Status.INACTIVE).count()
+        out_of_stock = Product.objects.filter(status=Product.Status.OUT_OF_STOCK).count()
+        low_stock = Product.objects.filter(stock__lte=5, status=Product.Status.ACTIVE).count()
+        return Response({
+            'total': total,
+            'active': active,
+            'inactive': inactive,
+            'out_of_stock': out_of_stock,
+            'low_stock': low_stock,
+        })

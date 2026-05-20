@@ -1,12 +1,16 @@
+"""
+Modelos de carrito y pedidos - AudioPro
+"""
 from django.db import models
-from django.core.validators import MinValueValidator
+from django.conf import settings
+from apps.products.models import Product
 from decimal import Decimal
 
 
 class Cart(models.Model):
     """Carrito de compras del usuario."""
     user = models.OneToOneField(
-        'users.User', on_delete=models.CASCADE, related_name='cart'
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='cart'
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -30,13 +34,13 @@ class Cart(models.Model):
 class CartItem(models.Model):
     """Ítem dentro del carrito."""
     cart = models.ForeignKey(Cart, on_delete=models.CASCADE, related_name='items')
-    product = models.ForeignKey('products.Product', on_delete=models.CASCADE)
-    quantity = models.PositiveIntegerField(default=1, validators=[MinValueValidator(1)])
+    product = models.ForeignKey(Product, on_delete=models.CASCADE)
+    quantity = models.PositiveIntegerField(default=1)
     added_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        verbose_name = 'Ítem de Carrito'
-        verbose_name_plural = 'Ítems de Carrito'
+        verbose_name = 'Ítem de carrito'
+        verbose_name_plural = 'Ítems de carrito'
         unique_together = ['cart', 'product']
 
     def __str__(self):
@@ -50,25 +54,25 @@ class CartItem(models.Model):
 class Order(models.Model):
     """Pedido confirmado."""
 
-    STATUS_CHOICES = [
-        ('pending', 'Pendiente de Pago'),
-        ('payment_review', 'Pago en Revisión'),
-        ('paid', 'Pagado'),
-        ('processing', 'En Proceso'),
-        ('shipped', 'Enviado'),
-        ('delivered', 'Entregado'),
-        ('cancelled', 'Cancelado'),
-    ]
+    class Status(models.TextChoices):
+        PENDING = 'pending', 'Pendiente'
+        PAYMENT_PENDING = 'payment_pending', 'Pago Pendiente'
+        PAID = 'paid', 'Pagado'
+        PROCESSING = 'processing', 'En Proceso'
+        SHIPPED = 'shipped', 'Enviado'
+        DELIVERED = 'delivered', 'Entregado'
+        CANCELLED = 'cancelled', 'Cancelado'
 
     user = models.ForeignKey(
-        'users.User', on_delete=models.PROTECT, related_name='orders'
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='orders'
     )
     order_number = models.CharField(max_length=20, unique=True)
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
-    subtotal = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0'))
-    total = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0'))
-    notes = models.TextField(blank=True, verbose_name='Notas del cliente')
-    shipping_address = models.TextField(blank=True, verbose_name='Dirección de envío')
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    subtotal = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0'))
+    tax = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0'))
+    total = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0'))
+    shipping_address = models.TextField(blank=True)
+    notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -83,24 +87,25 @@ class Order(models.Model):
     def save(self, *args, **kwargs):
         if not self.order_number:
             import uuid
-            self.order_number = f'ORD-{uuid.uuid4().hex[:8].upper()}'
+            self.order_number = f'AP-{uuid.uuid4().hex[:8].upper()}'
         super().save(*args, **kwargs)
 
 
 class OrderItem(models.Model):
     """Ítem dentro de un pedido."""
     order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='items')
-    product = models.ForeignKey('products.Product', on_delete=models.PROTECT)
+    product = models.ForeignKey(Product, on_delete=models.PROTECT)
     quantity = models.PositiveIntegerField()
     unit_price = models.DecimalField(max_digits=10, decimal_places=2)
+    subtotal = models.DecimalField(max_digits=12, decimal_places=2)
 
     class Meta:
-        verbose_name = 'Ítem de Pedido'
-        verbose_name_plural = 'Ítems de Pedido'
+        verbose_name = 'Ítem de pedido'
+        verbose_name_plural = 'Ítems de pedido'
 
     def __str__(self):
-        return f'{self.quantity}x {self.product.name}'
+        return f'{self.quantity}x {self.product.name} (Pedido #{self.order.order_number})'
 
-    @property
-    def subtotal(self):
-        return self.unit_price * self.quantity
+    def save(self, *args, **kwargs):
+        self.subtotal = self.unit_price * self.quantity
+        super().save(*args, **kwargs)

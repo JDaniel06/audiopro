@@ -10,29 +10,27 @@ build/
 .eggs/
 
 # Django
-*.sqlite3
-/backend/media/
-/backend/staticfiles/
-/backend/.env
+*.log
+local_settings.py
+db.sqlite3
+media/
+staticfiles/
 
-# Streamlit
-.streamlit/
-
-# Entornos virtuales
+# Entorno virtual
 venv/
 env/
 .venv/
-.env/
+.env
 
-# IDEs
+# IDE
 .vscode/
 .idea/
 *.swp
 *.swo
 
+# Docker
+.dockerignore
+
 # OS
 .DS_Store
 Thumbs.db
-
-# Logs
-*.log

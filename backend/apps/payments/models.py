@@ -1,38 +1,51 @@
+"""
+Modelos de pagos - AudioPro
+"""
 from django.db import models
+from django.conf import settings
+from apps.orders.models import Order
 
 
 class Payment(models.Model):
     """Registro de pago asociado a un pedido."""
 
-    METHOD_CHOICES = [
-        ('transfer', 'Transferencia Bancaria'),
-        ('mobile_pay', 'Pago Móvil'),
-        ('cash', 'Efectivo'),
-        ('other', 'Otro'),
-    ]
+    class Method(models.TextChoices):
+        STRIPE = 'stripe', 'Stripe (Tarjeta)'
+        TRANSFER = 'transfer', 'Transferencia Bancaria'
+        CASH = 'cash', 'Efectivo'
+        OTHER = 'other', 'Otro'
 
-    STATUS_CHOICES = [
-        ('pending', 'Pendiente de Revisión'),
-        ('approved', 'Aprobado'),
-        ('rejected', 'Rechazado'),
-    ]
+    class Status(models.TextChoices):
+        PENDING = 'pending', 'Pendiente'
+        UNDER_REVIEW = 'under_review', 'En Revisión'
+        APPROVED = 'approved', 'Aprobado'
+        REJECTED = 'rejected', 'Rechazado'
+        REFUNDED = 'refunded', 'Reembolsado'
 
-    order = models.OneToOneField(
-        'orders.Order', on_delete=models.CASCADE, related_name='payment'
-    )
+    order = models.OneToOneField(Order, on_delete=models.CASCADE, related_name='payment')
     user = models.ForeignKey(
-        'users.User', on_delete=models.PROTECT, related_name='payments'
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='payments'
     )
-    method = models.CharField(max_length=20, choices=METHOD_CHOICES, default='transfer')
-    amount = models.DecimalField(max_digits=10, decimal_places=2)
-    reference = models.CharField(max_length=100, blank=True, verbose_name='Referencia / Nro. de confirmación')
-    voucher = models.FileField(
-        upload_to='payment_vouchers/',
-        blank=True, null=True,
-        verbose_name='Comprobante de pago'
+    method = models.CharField(max_length=15, choices=Method.choices)
+    status = models.CharField(max_length=15, choices=Status.choices, default=Status.PENDING)
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+
+    # Stripe
+    stripe_session_id = models.CharField(max_length=200, blank=True)
+    stripe_payment_intent = models.CharField(max_length=200, blank=True)
+
+    # Comprobante manual
+    reference_number = models.CharField(max_length=100, blank=True)
+    notes = models.TextField(blank=True)
+
+    # Admin
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='reviewed_payments'
     )
-    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='pending')
-    admin_notes = models.TextField(blank=True, verbose_name='Notas del administrador')
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    rejection_reason = models.TextField(blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -42,4 +55,20 @@ class Payment(models.Model):
         ordering = ['-created_at']
 
     def __str__(self):
-        return f'Pago #{self.order.order_number} - {self.status}'
+        return f'Pago {self.order.order_number} - {self.get_status_display()}'
+
+
+class PaymentEvidence(models.Model):
+    """Comprobante/evidencia de pago adjuntado por el cliente."""
+    payment = models.ForeignKey(Payment, on_delete=models.CASCADE, related_name='evidences')
+    file = models.FileField(upload_to='payment_evidences/%Y/%m/')
+    file_name = models.CharField(max_length=200)
+    description = models.CharField(max_length=300, blank=True)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Evidencia de pago'
+        verbose_name_plural = 'Evidencias de pago'
+
+    def __str__(self):
+        return f'Evidencia de {self.payment.order.order_number}'

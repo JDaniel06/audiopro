@@ -1,11 +1,13 @@
+"""
+URLs de productos - AudioPro
+"""
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import CategoryViewSet, ProductViewSet, StockMovementViewSet
+from .views import CategoryViewSet, ProductViewSet
 
 router = DefaultRouter()
-router.register(r'categories', CategoryViewSet, basename='categories')
-router.register(r'', ProductViewSet, basename='products')
-router.register(r'stock/movements', StockMovementViewSet, basename='stock-movements')
+router.register(r'categories', CategoryViewSet, basename='category')
+router.register(r'', ProductViewSet, basename='product')
 
 urlpatterns = [
     path('', include(router.urls)),
