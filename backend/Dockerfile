@@ -22,3 +22,5 @@ COPY . .
 RUN mkdir -p /app/media /app/staticfiles
 
 EXPOSE 8000
+# Saber que va a ejecutar
+CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]
