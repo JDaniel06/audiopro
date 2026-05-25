@@ -3,7 +3,7 @@ URLs de pedidos y carrito - AudioPro
 """
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import CartItemViewSet, OrderViewSet, CartView
+from .views import CartItemViewSet, OrderViewSet
 
 router = DefaultRouter()
 # CartItemViewSet se registra bajo 'items'
