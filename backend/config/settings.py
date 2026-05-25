@@ -1,15 +1,19 @@
 """
-AudioPro - Django Settings
+AudioPro - Django Settings (Optimizado para Render)
 """
 import os
 from pathlib import Path
 from datetime import timedelta
 
+# Importar dj_database_url para Parsear DATABASE_URL de Render
+import dj_database_url
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-change-me-in-production')
 
-DEBUG = os.environ.get('DEBUG', 'True') == 'True'
+# DEBUG: Default a False para producción segura
+DEBUG = os.environ.get('DEBUG', 'False') == 'True'
 
 ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 
@@ -40,7 +44,7 @@ INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
-    'whitenoise.middleware.WhiteNoiseMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',  # ✅ Para estáticos en Render
     'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -70,16 +74,15 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'config.wsgi.application'
 
-# Base de datos PostgreSQL
+# ── BASE DE DATOS: Configuración para Render ─────────────────────────────────
+# Render proporciona DATABASE_URL, usamos dj_database_url para parsearlo
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': os.environ.get('DB_NAME', 'audiopro'),
-        'USER': os.environ.get('DB_USER', 'postgres'),
-        'PASSWORD': os.environ.get('DB_PASSWORD', 'postgres'),
-        'HOST': os.environ.get('DB_HOST', 'localhost'),
-        'PORT': os.environ.get('DB_PORT', '5432'),
-    }
+    'default': dj_database_url.config(
+        # Fallback a variables individuales (para desarrollo local con docker-compose)
+        default=os.environ.get('DATABASE_URL'),
+        conn_max_age=600,  # Mantener conexiones abiertas (mejor rendimiento)
+        conn_health_checks=True,  # Verificar conexión antes de usarla
+    )
 }
 
 AUTH_PASSWORD_VALIDATORS = [
@@ -94,18 +97,31 @@ TIME_ZONE = 'America/Caracas'
 USE_I18N = True
 USE_TZ = True
 
+# ── ARCHIVOS ESTÁTICOS (WhiteNoise para Render) ─────────────────────────────
 STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
+# ── ARCHIVOS MEDIA (Imágenes) ───────────────────────────────────────────────
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
+
+# ⚠️ Para producción en Render, configura Cloudinary (ver sección abajo)
+# if not DEBUG:
+#     import cloudinary
+#     cloudinary.config(
+#         cloud_name=os.environ.get('CLOUDINARY_CLOUD_NAME'),
+#         api_key=os.environ.get('CLOUDINARY_API_KEY'),
+#         api_secret=os.environ.get('CLOUDINARY_API_SECRET'),
+#         secure=True
+#     )
+#     DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 AUTH_USER_MODEL = 'users.User'
 
-# Django REST Framework
+# ── Django REST Framework ───────────────────────────────────────────────────
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
@@ -122,7 +138,7 @@ REST_FRAMEWORK = {
     'PAGE_SIZE': 20,
 }
 
-# JWT
+# ── JWT ─────────────────────────────────────────────────────────────────────
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(hours=8),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
@@ -131,17 +147,29 @@ SIMPLE_JWT = {
     'AUTH_HEADER_TYPES': ('Bearer',),
 }
 
-# CORS
+# ── CORS ────────────────────────────────────────────────────────────────────
 CORS_ALLOWED_ORIGINS = os.environ.get(
     'CORS_ALLOWED_ORIGINS',
     'http://localhost:8501,http://127.0.0.1:8501'
 ).split(',')
 CORS_ALLOW_CREDENTIALS = True
 
-# Stripe
+# ── Stripe ──────────────────────────────────────────────────────────────────
 STRIPE_SECRET_KEY = os.environ.get('STRIPE_SECRET_KEY', '')
 STRIPE_PUBLISHABLE_KEY = os.environ.get('STRIPE_PUBLISHABLE_KEY', '')
 STRIPE_WEBHOOK_SECRET = os.environ.get('STRIPE_WEBHOOK_SECRET', '')
 
-# Frontend URL (Streamlit)
+# ── Frontend URL (Streamlit) ────────────────────────────────────────────────
 FRONTEND_URL = os.environ.get('FRONTEND_URL', 'http://localhost:8501')
+
+# ── SEGURIDAD PARA PRODUCCIÓN (Render) ──────────────────────────────────────
+if not DEBUG:
+    SECURE_SSL_REDIRECT = True  # Forzar HTTPS
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_BROWSER_XSS_FILTER = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    X_FRAME_OPTIONS = 'DENY'
+    SECURE_HSTS_SECONDS = 3600  # 1 hora
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
