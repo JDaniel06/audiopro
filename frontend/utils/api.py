@@ -5,7 +5,7 @@ import requests
 import streamlit as st
 import os
 
-API_BASE = os.environ.get('API_BASE_URL', 'http://localhost:8000/api')
+API_BASE = os.environ.get('API_BASE_URL', 'https://audiopro-4p6x.onrender.com/api')
 
 
 def get_headers():
@@ -91,3 +91,56 @@ def _parse_error(response):
         return str(data)
     except Exception:
         return f'Error {response.status_code}'
+
+# Agrega esta función en utils/api.py
+
+def refresh_access_token():
+    """Intenta refrescar el token de acceso."""
+    refresh_token = st.session_state.get('refresh_token')
+    if not refresh_token:
+        return False
+    
+    try:
+        r = requests.post(
+            f'{API_BASE}/auth/token/refresh/',
+            json={'refresh': refresh_token},
+            timeout=10
+        )
+        if r.status_code == 200:
+            data = r.json()
+            st.session_state['access_token'] = data['access']
+            # Opcional: actualizar refresh_token si usas rotación
+            if 'refresh' in data:
+                st.session_state['refresh_token'] = data['refresh']
+            return True
+    except:
+        pass
+    return False
+
+
+# Modifica api_get para reintentar con token refrescado:
+def api_get(endpoint, params=None, _retry=True):
+    try:
+        r = requests.get(f'{API_BASE}{endpoint}', headers=get_headers(), params=params, timeout=10)
+        
+        # Si es 401 y podemos reintentar, refrescamos token
+        if r.status_code == 401 and _retry:
+            if refresh_access_token():
+                return api_get(endpoint, params, _retry=False)  # Reintentar una vez
+            else:
+                # Token inválido, cerrar sesión
+                if 'access_token' in st.session_state:
+                    del st.session_state['access_token']
+                if 'refresh_token' in st.session_state:
+                    del st.session_state['refresh_token']
+                return None, 'Sesión expirada. Por favor inicia sesión nuevamente.'
+        
+        r.raise_for_status()
+        return r.json(), None
+        
+    except requests.exceptions.HTTPError as e:
+        return None, _parse_error(e.response)
+    except requests.exceptions.ConnectionError:
+        return None, 'No se puede conectar con el servidor.'
+    except Exception as e:
+        return None, str(e)
