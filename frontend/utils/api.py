@@ -5,8 +5,7 @@ import requests
 import streamlit as st
 import os
 
-API_BASE = os.environ.get('API_BASE_URL', 'https://audiopro-4p6x.onrender.com/api')
-
+API_BASE = os.environ.get('API_BASE_URL', 'https://backend-rsj.onrender.com/api')
 
 def get_headers():
     """Retorna headers con token JWT si existe."""
