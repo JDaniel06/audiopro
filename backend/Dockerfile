@@ -21,10 +21,10 @@ COPY . .
 RUN mkdir -p /app/media /app/staticfiles
 
 # ⚠️ EJECUTAR MIGRACIONES
-RUN python manage.py migrate --noinput
+# RUN python manage.py migrate --noinput
 
 # Colectar estáticos
-RUN python manage.py collectstatic --noinput
+# RUN python manage.py collectstatic --noinput
 
 # Exponer puerto
 EXPOSE 8000
