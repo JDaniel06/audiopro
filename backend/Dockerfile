@@ -20,14 +20,11 @@ COPY . .
 # Crear directorios
 RUN mkdir -p /app/media /app/staticfiles
 
-# ⚠️ EJECUTAR MIGRACIONES
-# RUN python manage.py migrate --noinput
-
-# Colectar estáticos
-# RUN python manage.py collectstatic --noinput
+# ⚠️ Dar permisos de ejecución al script
+RUN chmod +x /app/start.sh
 
 # Exponer puerto
 EXPOSE 8000
 
-# Comando de producción con Gunicorn
-CMD gunicorn config.wsgi:application --bind 0.0.0.0:$PORT --workers 2
+# Usar el script de inicio
+CMD ["/app/start.sh"]
